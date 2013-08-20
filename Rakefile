@@ -1,5 +1,7 @@
 require 'rake/testtask'
 
+BASEDIR = File.dirname(__FILE__)
+
 Rake::TestTask.new do |t|
 	t.pattern = 'test/unit/test_*.rb'
 end
@@ -12,7 +14,7 @@ task :start_servers do
 	pids = []
 	(8001..8009).each do |port|
 		puts "Starting on port #{port}..."
-		pids << spawn({'SHARD_ID' => "test-#{port}"}, "rackup -p #{port} -s Puma")
+		pids << spawn({'SHARD_ID' => "test-#{port}"}, "#{BASEDIR}/bin/rackup -p #{port} -s Puma")
 	end
 	puts 'Now wait for Pumas to start...'
 	begin 
