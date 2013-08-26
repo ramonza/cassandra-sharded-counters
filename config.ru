@@ -1,3 +1,3 @@
 require_relative 'bootstrap'
 require 'api'
-run API
+run ShardedCounters::API

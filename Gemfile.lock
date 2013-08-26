@@ -55,6 +55,8 @@ GEM
       rack (>= 0.4)
     rack-mount (0.8.3)
       rack (>= 1.0.0)
+    rack-test (0.6.2)
+      rack (>= 1.0)
     rake (10.1.0)
     ruby-maven (3.0.4.1.4)
       maven-tools (~> 0.32.3)
@@ -81,4 +83,5 @@ DEPENDENCIES
   minitest-reporters
   pry
   puma
+  rack-test
   rake

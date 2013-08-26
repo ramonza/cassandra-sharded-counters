@@ -7,7 +7,8 @@ class TestApiMultiprocess < MiniTest::Unit::TestCase
 
 	def test_approx_distinct
     @counter = 'approx_distinct'
-    @time = '2010-01-01+09:00'
+    @row = 'abc'
+    @column = 'def'
 
     all_instances do |port|
       Net::HTTP.post_form(URI("http://localhost:#{port}/#{@counter}/reset"), {})
@@ -39,14 +40,14 @@ class TestApiMultiprocess < MiniTest::Unit::TestCase
 	end
 
 	def post_sequence_on(port, range_start, range_end)
-    uri = URI("http://localhost:#{port}/#{@counter}/add-sequence?time=#{@time}")
+    uri = URI("http://localhost:#{port}/#{@counter}/#{@row}/#{@column}/add-sequence")
     Net::HTTP.post_form(uri, range_start: range_start, range_end: range_end)
   end
 
 	def read_count_from(port)
-    uri = URI("http://localhost:#{port}/#{@counter}/hourly-summary?time=#{@time}")
+    uri = URI("http://localhost:#{port}/#{@counter}/#{@row}")
     response = Net::HTTP.get(uri)
-    JSON.parse(response)['9']
+    JSON.parse(response)[@column]
   end
 
 end

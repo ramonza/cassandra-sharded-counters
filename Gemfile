@@ -12,6 +12,7 @@ gem 'pry'
 group :test do
 	gem 'minitest'
   gem 'minitest-reporters'
+  gem 'rack-test'
 end
 
 group :development do

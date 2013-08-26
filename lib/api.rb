@@ -3,81 +3,69 @@ require 'json'
 require 'time'
 
 require 'counter'
-require 'counter_store'
+require 'aggregate_table'
 require 'approx_distinct_counter'
 require 'simple_counters'
 
-class API < Grape::API
+module ShardedCounters
+  class API < Grape::API
 
-  TYPES = {
-      approx_distinct: ApproxDistinctCounter,
-      sum: SumCounter,
-      min: MinCounter,
-      max: MaxCounter,
-  }
+    default_format :json
 
-  TYPES.each do |name, counter_type|
+    TYPES = {
+        approx_distinct: ApproxDistinctCounter,
+        sum: SumCounter,
+        min: MinCounter,
+        max: MaxCounter,
+    }
 
-    store = CounterStore.new(name, counter_type)
+    TYPES.each do |name, counter_type|
 
-    resource name do
-      helpers do
-        def time
-          @time ||= (params[:time] || Time.now)
+      store = AggregateTable.new(name, counter_type)
+
+      resource name do
+
+        desc 'Add a single value'
+        params do
+          requires :value, type: Integer, desc: 'The value to add'
         end
-        def hour
-          @hour ||= time.strftime("%H").to_i
-        end
-        def day
-          @day ||= time.strftime("%Y%m%d")
-        end
-      end
-
-      desc 'Add a single value'
-      params do
-        optional :time, type: Time
-        requires :value, type: Integer, desc: 'The value to add'
-      end
-      post 'add/:value' do
-        value = params[:value]
-        counter = store.get_for_update(day, hour)
-        counter.update(value)
-        counter.save
-        "OK: #{value}\n"
-      end
-
-      desc 'Add a sequence of values'
-      params do
-        optional :time, type: Time
-        requires :range_start, type: Integer, desc: 'Start of the range'
-        requires :range_end, type: Integer, desc: 'End of the range'
-      end
-      post 'add-sequence' do
-        min, max = %w(range_start range_end).map { |k| params[k].to_i }
-        to_save = Set.new
-        (min..max).each do |value|
-          counter = store.get_for_update(day, hour)
+        post ':row_key/:column_key' do
+          value = params[:value]
+          counter = store.get_for_update(params[:row_key], params[:column_key])
           counter.update(value)
-          to_save << counter
+          counter.save
+          nil
         end
-        to_save.each &:save
-        'OK'
+
+        desc 'Add a sequence of values'
+        params do
+          requires :range_start, type: Integer, desc: 'Start of the range'
+          requires :range_end, type: Integer, desc: 'End of the range'
+        end
+        post ':row_key/:column_key/add-sequence' do
+          to_save = Set.new
+          (params[:range_start]..params[:range_end]).each do |value|
+            counter = store.get_for_update(params[:row_key], params[:column_key])
+            counter.update(value)
+            to_save << counter
+          end
+
+          to_save.each &:save
+          nil
+        end
+
+        desc 'Read values in a row'
+        get ':row_key' do
+          store.read_row(params[:row_key])
+        end
+
+        desc 'Remove all values'
+        delete do
+          store.reset
+          nil
+        end
       end
 
-      desc 'Produce an hourly summary'
-      params do
-        optional :time, type: Time
-      end
-      get 'hourly-summary' do
-        result = store.read_hourly_counters(day)
-        JSON.pretty_generate(result)
-      end
-
-      desc 'Remove all values'
-      post 'reset' do
-        store.reset
-      end
     end
-
   end
 end

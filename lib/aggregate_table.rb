@@ -4,10 +4,10 @@ require 'counter'
 require 'socket'
 
 # Store counters in Cassandra. Each server instance has a unique +shard_id+ which
-# it is responsible for. We guarantee serializable consistency between values with the same +shard_id+
+# it is responsible for. We guarantee local consistency between values with the same +shard_id+
 # so that we can just push new values to Cassandra without first reading existing values.
 # When we come to query the total value of the counters, we combine all these shard-local values.
-class CounterStore
+class AggregateTable
 
   @client = Cql::Client.connect(host: 'localhost')
   @client.use('counters')
@@ -25,31 +25,31 @@ class CounterStore
 
   def initialize(table_name, factory)
     @table_name, @factory = table_name, factory
-    @save_statement = self.class.cql.prepare("UPDATE #{table_name} SET counter_state = ? WHERE day = ? AND hour = ? AND shard_id = ?")
-    @select_hourly_statement = self.class.cql.prepare("SELECT * FROM #{table_name} WHERE day = ?")
-    @retrieve_statement = self.class.cql.prepare("SELECT * FROM #{table_name} WHERE day = ? AND hour = ? AND shard_id = ?")
+    @save_statement = self.class.cql.prepare("UPDATE #{table_name} SET counter_state = ? WHERE row_key = ? AND column_key = ? AND shard_id = ?")
+    @select_row = self.class.cql.prepare("SELECT * FROM #{table_name} WHERE row_key = ?")
+    @retrieve_statement = self.class.cql.prepare("SELECT * FROM #{table_name} WHERE row_key = ? AND column_key = ? AND shard_id = ?")
     @cache = Java::JavaUtilConcurrent::ConcurrentHashMap.new
   end
 
-	def read_hourly_counters(day)
-    results = @select_hourly_statement.execute(day, :one).group_by { |row| row['hour'] }
-    entries = results.collect do |hour, rows|
+	def read_row(row_key)
+    by_column = @select_row.execute(row_key, :one).group_by { |row| row['column_key'] }
+    entries = by_column.collect do |row_key, rows|
       shards = rows.map { |row|
         @factory.deserialize(row['counter_state'])
       }
       sum = @factory.merge(shards).value
-      [hour, sum]
+      [row_key, sum]
     end
     Hash[entries]
   end
 
 	def reset
 		@cache.clear
-		self.class.cql.execute("TRUNCATE #{table_name}", :one)
+		self.class.cql.execute("TRUNCATE #{table_name}", :all)
   end
 
-	def get_for_update(day, hour)
-		key = [day, hour]
+	def get_for_update(row_key, column_key)
+		key = [row_key, column_key]
 		result = @cache[key]
 		unless result
 			counter = CounterHolder.new(self, key)
@@ -60,8 +60,8 @@ class CounterStore
   end
 
   def retrieve(key)
-    day, hour = key
-    row = @retrieve_statement.execute(day, hour, self.class.shard_id, :one)
+    row_key, column_key = key
+    row = @retrieve_statement.execute(row_key, column_key, self.class.shard_id, :one)
     if row.empty?
       @factory.new
     else
@@ -70,8 +70,8 @@ class CounterStore
   end
 
   def store(key, counter)
-    day, hour = key
-    @save_statement.execute(counter.serialize, day, hour, self.class.shard_id, :one)
+    row_key, column_key = key
+    @save_statement.execute(counter.serialize, row_key, column_key, self.class.shard_id, :one)
   end
 end
 

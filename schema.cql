@@ -5,35 +5,35 @@ CREATE KEYSPACE counters WITH
 USE counters;
 
 CREATE TABLE approx_distinct (
-	day VARCHAR,
-	hour INT,
+	row_key VARCHAR,
+	column_key VARCHAR,
 	shard_id VARCHAR,
 	counter_state BLOB,
-	PRIMARY KEY (day, hour, shard_id)
+	PRIMARY KEY (row_key, column_key, shard_id)
 );
 
 
 CREATE TABLE sum (
-	day VARCHAR,
-	hour INT,
+	row_key VARCHAR,
+	column_key VARCHAR,
 	shard_id VARCHAR,
 	counter_state BLOB,
-	PRIMARY KEY (day, hour, shard_id)
+	PRIMARY KEY (row_key, column_key, shard_id)
 );
 
 
 CREATE TABLE min (
-	day VARCHAR,
-	hour INT,
+	row_key VARCHAR,
+	column_key VARCHAR,
 	shard_id VARCHAR,
 	counter_state BLOB,
-	PRIMARY KEY (day, hour, shard_id)
+	PRIMARY KEY (row_key, column_key, shard_id)
 );
 
 CREATE TABLE max (
-	day VARCHAR,
-	hour INT,
+	row_key VARCHAR,
+	column_key VARCHAR,
 	shard_id VARCHAR,
 	counter_state BLOB,
-	PRIMARY KEY (day, hour, shard_id)
+	PRIMARY KEY (row_key, column_key, shard_id)
 );

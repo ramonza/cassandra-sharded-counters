@@ -6,8 +6,12 @@ Rake::TestTask.new do |t|
 	t.pattern = 'test/unit/test_*.rb'
 end
 
-Rake::TestTask.new :integration do |t|
+Rake::TestTask.new :multiprocess_test do |t|
   t.pattern = 'test/integration/test_*.rb'
+end
+
+Rake::TestTask.new :rack_test do |t|
+  t.pattern = 'test/rack/test_*.rb'
 end
 
 task :start_servers do
