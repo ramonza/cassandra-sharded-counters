@@ -11,8 +11,8 @@ class AggregateTable
 
   extend Forwardable
 
-  @host_id = ENV['HOST_ID'] || Socket.gethostname.hash
-  @current_run = ENV['RUN_ID'] || 1
+  @host_id = (ENV['HOST_ID'] || Socket.gethostname.hash).to_i
+  @current_run = (ENV['RUN_ID'] || 1).to_i
 
   class << self
     attr_reader :host_id, :current_run
@@ -23,8 +23,9 @@ class AggregateTable
 
   def initialize(table_name, factory)
     @table_name, @factory = table_name, factory
-    @cache = Java::JavaUtilConcurrent::ConcurrentHashMap.new
-    @generation = Java::JavaUtilConcurrentAtomic::AtomicInteger.new(1)
+    @cache = Hash.new
+    @current_generation = 1
+    @update_access = Mutex.new
     start_run
   end
 
@@ -41,41 +42,36 @@ class AggregateTable
     Hash[entries]
   end
 
-	def reset
-		@cache.clear
-		CqlHelper.execute("TRUNCATE #{table_name}", {}, :all)
+	def clear!
+    CqlHelper.execute("TRUNCATE #{table_name}", {}, :all)
+		clear_cache
   end
 
-	def get_for_update(row_key, column_key)
-		key = [row_key, column_key]
-		result = @cache[key]
-		unless result
-			counter = Accumulator.new(self, row_key, column_key, @generation.get)
-			result = @cache.put_if_absent(key, counter) || counter
-		end
-		result
-  end
-
-  def retrieve(key)
-    row_key, column_key = key
-    row = CqlHelper.query("SELECT * FROM #{table_name} WHERE row_key = %{row} AND column_key = %{column} AND shard_id = %{shard_id}",
-                          row: row_key, column: column_key, shard_id: self.class.shard_id)
-    if row.empty?
-      @factory.new
-    else
-      @factory.deserialize(row.first['counter_state'])
+  def clear_cache
+    @update_access.synchronize do
+      @current_generation += 1
+      @cache = Hash.new
     end
   end
 
-  def store(entry, state)
+	def update(row_key, column_key, value)
+    @update_access.synchronize do
+		  key = [row_key, column_key]
+      accumulator = (@cache[key] ||= Accumulator.new(@current_generation, new_counter))
+      accumulator.update(value)
+      store(row_key, column_key, accumulator.generation, accumulator.serialize)
+    end
+  end
+
+  def store(row_key, column_key, generation, state)
     key = {
-        row_key: entry.row_key,
-        column_key: entry.column_key,
+        row_key: row_key,
+        column_key: column_key,
         host_id: host_id,
         run: current_run,
-        generation: entry.generation
+        generation: generation
     }
-    CqlHelper.update(table_name, key, {counter_state: state})
+    CqlHelper.update(table_name, key, {counter_state: CqlHelper::Blob.new(state)})
   end
 
   private
@@ -96,27 +92,7 @@ class AggregateTable
 end
 
 # An in-memory holder for a Counter that accumulates updates.
-class Accumulator
-
-  attr_reader :row_key, :column_key, :generation
-
-  def initialize(store, row_key, column_key, generation)
-    @store, @row_key, @column_key, @generation = store, row_key, column_key, generation
-    @counter = store.new_counter
-    @mutex = Mutex.new
-  end
-
-  def save
-    state = lock { @counter.serialize }
-    @store.store(self, CqlHelper::Blob.new(state))
-  end
-
-  def update(item)
-    lock { @counter.update(item) }
-  end
-
-  private
-  def lock
-    @mutex.synchronize { yield }
-  end
+class Accumulator < Struct.new(:generation, :counter)
+  extend Forwardable
+  delegate [:serialize, :update] => :counter
 end

@@ -31,9 +31,7 @@ module ShardedCounters
         end
         post ':row_key/:column_key' do
           value = params[:value]
-          counter = store.get_for_update(params[:row_key], params[:column_key])
-          counter.update(value)
-          counter.save
+          store.update(params[:row_key], params[:column_key], value)
           nil
         end
 
@@ -43,14 +41,9 @@ module ShardedCounters
           requires :range_end, type: Integer, desc: 'End of the range'
         end
         post ':row_key/:column_key/add-sequence' do
-          to_save = Set.new
           (params[:range_start]..params[:range_end]).each do |value|
-            counter = store.get_for_update(params[:row_key], params[:column_key])
-            counter.update(value)
-            to_save << counter
+            store.update(params[:row_key], params[:column_key], value)
           end
-
-          to_save.each &:save
           nil
         end
 
@@ -61,7 +54,13 @@ module ShardedCounters
 
         desc 'Remove all values'
         delete do
-          store.reset
+          store.clear!
+          nil
+        end
+
+        desc 'Clear the in-memory cache'
+        delete '/cache' do
+          store.clear_cache
           nil
         end
       end

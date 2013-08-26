@@ -20,7 +20,7 @@ task :start_servers do
   pids = []
   (8001..8009).each do |port|
     puts "Starting on port #{port}..."
-    pids << spawn({'HOST_ID' => "test-#{port}", 'RUN_ID' => '1'}, "#{BASEDIR}/bin/rackup -p #{port} -s Puma")
+    pids << spawn({'HOST_ID' => port, 'RUN_ID' => '1'}, "#{BASEDIR}/bin/rackup -p #{port} -s Puma")
   end
   puts 'Now wait for Pumas to start...'
   begin

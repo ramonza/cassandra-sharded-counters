@@ -33,7 +33,11 @@ module CqlHelper
   def self.query(cql, params = {}, consistency = :one)
     interpolated = interpolate_cql(cql, params)
     $stderr.puts "CQL : #{interpolated}" if debug_cql?
-    client.execute(interpolated, consistency)
+    begin
+      client.execute(interpolated, consistency)
+    rescue => e
+      raise "Error executing CQL '#{interpolated}': #{e.message}"
+    end
   end
 
   def self.debug_cql?

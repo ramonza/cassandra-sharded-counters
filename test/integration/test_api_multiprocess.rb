@@ -11,7 +11,10 @@ class TestApiMultiprocess < MiniTest::Unit::TestCase
     @column = 'def'
 
     all_instances do |port|
-      Net::HTTP.post_form(URI("http://localhost:#{port}/#{@counter}/reset"), {})
+      Net::HTTP.start 'localhost', port do |http|
+        request = Net::HTTP::Delete.new("/#{@counter}")
+        http.request(request)
+      end
     end
 
 		post_sequence_on('8002', 1, 1000)

@@ -45,6 +45,20 @@ class TestApi < MiniTest::Unit::TestCase
     assert_equal 1275, values['baz']
   end
 
+  def test_clear_cache
+    post '/sum/foo/bar/add-sequence', {range_start: 1, range_end: 100}
+    assert_ok
+    delete '/sum/cache'
+    assert_ok
+    post '/sum/foo/baz/add-sequence', {range_start: 1, range_end: 50}
+    assert_ok
+    get '/sum/foo'
+    assert_ok
+    values = JSON.parse(last_response.body)
+    assert_equal 5050, values['bar']
+    assert_equal 1275, values['baz']
+  end
+
   private
 
   def assert_ok
