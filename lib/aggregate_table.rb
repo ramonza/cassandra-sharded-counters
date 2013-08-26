@@ -1,5 +1,4 @@
-require 'cql'
-require 'singleton'
+require 'cql_helper'
 require 'counter'
 require 'socket'
 
@@ -9,13 +8,7 @@ require 'socket'
 # When we come to query the total value of the counters, we combine all these shard-local values.
 class AggregateTable
 
-  @client = Cql::Client.connect(host: 'localhost')
-  @client.use('counters')
   @shard_id = ENV['SHARD_ID'] || "#{Socket.gethostname}-#{Process.pid}"
-
-  def self.cql
-    @client
-  end
 
   def self.shard_id
     @shard_id
@@ -25,14 +18,12 @@ class AggregateTable
 
   def initialize(table_name, factory)
     @table_name, @factory = table_name, factory
-    @save_statement = self.class.cql.prepare("UPDATE #{table_name} SET counter_state = ? WHERE row_key = ? AND column_key = ? AND shard_id = ?")
-    @select_row = self.class.cql.prepare("SELECT * FROM #{table_name} WHERE row_key = ?")
-    @retrieve_statement = self.class.cql.prepare("SELECT * FROM #{table_name} WHERE row_key = ? AND column_key = ? AND shard_id = ?")
     @cache = Java::JavaUtilConcurrent::ConcurrentHashMap.new
   end
 
 	def read_row(row_key)
-    by_column = @select_row.execute(row_key, :one).group_by { |row| row['column_key'] }
+    results = CqlHelper.query("SELECT * FROM #{table_name} WHERE row_key = %{row}", {row: row_key})
+    by_column = results.group_by { |row| row['column_key'] }
     entries = by_column.collect do |row_key, rows|
       shards = rows.map { |row|
         @factory.deserialize(row['counter_state'])
@@ -45,7 +36,7 @@ class AggregateTable
 
 	def reset
 		@cache.clear
-		self.class.cql.execute("TRUNCATE #{table_name}", :all)
+		CqlHelper.execute("TRUNCATE #{table_name}", {}, :all)
   end
 
 	def get_for_update(row_key, column_key)
@@ -61,7 +52,8 @@ class AggregateTable
 
   def retrieve(key)
     row_key, column_key = key
-    row = @retrieve_statement.execute(row_key, column_key, self.class.shard_id, :one)
+    row = CqlHelper.query("SELECT * FROM #{table_name} WHERE row_key = %{row} AND column_key = %{column} AND shard_id = %{shard_id}",
+                          row: row_key, column: column_key, shard_id: self.class.shard_id)
     if row.empty?
       @factory.new
     else
@@ -71,7 +63,9 @@ class AggregateTable
 
   def store(key, counter)
     row_key, column_key = key
-    @save_statement.execute(counter.serialize, row_key, column_key, self.class.shard_id, :one)
+    CqlHelper.update(table_name,
+                     {row_key: row_key, column_key: column_key, shard_id: self.class.shard_id},
+                     {counter_state: CqlHelper::Blob.new(counter.serialize)})
   end
 end
 
