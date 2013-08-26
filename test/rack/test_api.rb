@@ -55,8 +55,8 @@ class TestApi < MiniTest::Unit::TestCase
     get '/sum/foo'
     assert_ok
     values = JSON.parse(last_response.body)
-    assert_equal 5050, values['bar']
-    assert_equal 1275, values['baz']
+    assert_equal 5050, values['bar'], values.inspect
+    assert_equal 1275, values['baz'], values.inspect
   end
 
   private

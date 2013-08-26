@@ -57,6 +57,7 @@ task :create_schema do
       host_id VARINT,
       aggregate_table VARCHAR,
       current_run VARINT,
+      started_at TIMESTAMP,
       PRIMARY KEY (host_id, aggregate_table)
     )
   EOF
@@ -71,6 +72,7 @@ task :create_schema do
         run VARINT,
         generation VARINT,
         counter_state BLOB,
+        final BOOLEAN,
         PRIMARY KEY (row_key, column_key, host_id, run, generation)
       )
     EOF

@@ -24,15 +24,25 @@ module CqlHelper
   end
 
   def self.quote_cql_param(value)
-    return value.to_s if value.is_a? Numeric
-    return quote_cql_string(value.to_s) if value.is_a?(String) || value.is_a?(Symbol)
     return value.to_cql if value.respond_to? :to_cql
-    raise "Don't know how to convert #{value} to CQL"
+    case value
+      when Numeric, true, false
+        value.to_s
+      when String, Symbol
+        quote_cql_string(value.to_s)
+      when Time
+        (value.to_f * 1000).to_i.to_s
+      else
+        raise "Don't know how to convert #{value} to CQL"
+    end
   end
 
   def self.query(cql, params = {}, consistency = :one)
     interpolated = interpolate_cql(cql, params)
-    $stderr.puts "CQL : #{interpolated}" if debug_cql?
+    if debug_cql?
+      $stderr.puts "CQL : #{interpolated}"
+      $stderr.flush
+    end
     begin
       client.execute(interpolated, consistency)
     rescue => e

@@ -32,53 +32,63 @@ class AggregateTable
 	def read_row(row_key)
     results = CqlHelper.query("SELECT * FROM #{table_name} WHERE row_key = %{row}", {row: row_key})
     by_column = results.group_by { |row| row['column_key'] }
-    entries = by_column.collect do |row_key, rows|
+    report = Hash.new
+    by_column.each do |column_key, rows|
       shards = rows.map { |row|
         @factory.deserialize(row['counter_state'])
       }
       sum = @factory.merge(shards).value
-      [row_key, sum]
+      report[column_key] = sum
     end
-    Hash[entries]
+    report
   end
 
-	def clear!
-    CqlHelper.execute("TRUNCATE #{table_name}", {}, :all)
-		clear_cache
+	def clear! # this is just for testing
+    @update_access.synchronize do
+      CqlHelper.execute("TRUNCATE #{table_name}")
+      @cache = Hash.new
+    end
   end
 
   def clear_cache
     @update_access.synchronize do
-      @current_generation += 1
+      @cache.each do |key, accumulator|
+        store(key, accumulator.generation, accumulator.serialize, true)
+      end
       @cache = Hash.new
+      @current_generation += 1
     end
   end
 
 	def update(row_key, column_key, value)
     @update_access.synchronize do
-		  key = [row_key, column_key]
+		  key = AggregateKey.new(row_key, column_key)
       accumulator = (@cache[key] ||= Accumulator.new(@current_generation, new_counter))
       accumulator.update(value)
-      store(row_key, column_key, accumulator.generation, accumulator.serialize)
+      store(key, accumulator.generation, accumulator.serialize)
     end
   end
 
-  def store(row_key, column_key, generation, state)
-    key = {
-        row_key: row_key,
-        column_key: column_key,
+  def store(key, generation, state, finalize = false)
+    key_columns = {
+        row_key: key.row,
+        column_key: key.column,
         host_id: host_id,
         run: current_run,
         generation: generation
     }
-    CqlHelper.update(table_name, key, {counter_state: CqlHelper::Blob.new(state)})
+    updates = {
+        counter_state: CqlHelper::Blob.new(state)
+    }
+    updates[:final] = true if finalize
+    CqlHelper.update(table_name, key_columns, updates)
   end
 
   private
 
   def start_run
     sanity_check!
-    CqlHelper.update('host_current_runs', {host_id: host_id, aggregate_table: table_name}, {current_run: current_run})
+    CqlHelper.update('host_current_runs', {host_id: host_id, aggregate_table: table_name}, {current_run: current_run, started_at: Time.now})
   end
 
   def sanity_check!
@@ -89,6 +99,9 @@ class AggregateTable
   end
 
   def_delegator :@factory, :new, :new_counter
+end
+
+class AggregateKey < Struct.new(:row, :column)
 end
 
 # An in-memory holder for a Counter that accumulates updates.
