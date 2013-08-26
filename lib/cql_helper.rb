@@ -25,7 +25,7 @@ module CqlHelper
 
   def self.quote_cql_param(value)
     return value.to_s if value.is_a? Numeric
-    return quote_cql_string(value) if value.is_a? String
+    return quote_cql_string(value.to_s) if value.is_a?(String) || value.is_a?(Symbol)
     return value.to_cql if value.respond_to? :to_cql
     raise "Don't know how to convert #{value} to CQL"
   end

@@ -1,6 +1,7 @@
 require 'cql_helper'
 require 'counter'
 require 'socket'
+require 'forwardable'
 
 # Store counters in Cassandra. Each server instance has a unique +shard_id+ which
 # it is responsible for. We guarantee local consistency between values with the same +shard_id+
@@ -8,17 +9,23 @@ require 'socket'
 # When we come to query the total value of the counters, we combine all these shard-local values.
 class AggregateTable
 
-  @shard_id = ENV['SHARD_ID'] || "#{Socket.gethostname}-#{Process.pid}"
+  extend Forwardable
 
-  def self.shard_id
-    @shard_id
+  @host_id = ENV['HOST_ID'] || Socket.gethostname.hash
+  @current_run = ENV['RUN_ID'] || 1
+
+  class << self
+    attr_reader :host_id, :current_run
   end
 
+  delegate [:host_id, :current_run] => 'self.class'
   attr_reader :table_name
 
   def initialize(table_name, factory)
     @table_name, @factory = table_name, factory
     @cache = Java::JavaUtilConcurrent::ConcurrentHashMap.new
+    @generation = Java::JavaUtilConcurrentAtomic::AtomicInteger.new(1)
+    start_run
   end
 
 	def read_row(row_key)
@@ -43,10 +50,9 @@ class AggregateTable
 		key = [row_key, column_key]
 		result = @cache[key]
 		unless result
-			counter = CounterHolder.new(self, key)
+			counter = Accumulator.new(self, row_key, column_key, @generation.get)
 			result = @cache.put_if_absent(key, counter) || counter
 		end
-		result.fetch!
 		result
   end
 
@@ -61,38 +67,52 @@ class AggregateTable
     end
   end
 
-  def store(key, counter)
-    row_key, column_key = key
-    CqlHelper.update(table_name,
-                     {row_key: row_key, column_key: column_key, shard_id: self.class.shard_id},
-                     {counter_state: CqlHelper::Blob.new(counter.serialize)})
+  def store(entry, state)
+    key = {
+        row_key: entry.row_key,
+        column_key: entry.column_key,
+        host_id: host_id,
+        run: current_run,
+        generation: entry.generation
+    }
+    CqlHelper.update(table_name, key, {counter_state: state})
   end
+
+  private
+
+  def start_run
+    sanity_check!
+    CqlHelper.update('host_current_runs', {host_id: host_id, aggregate_table: table_name}, {current_run: current_run})
+  end
+
+  def sanity_check!
+    previous_runs = CqlHelper.query('SELECT current_run FROM host_current_runs WHERE aggregate_table = %{aggregate_table} AND host_id = %{host_id}',
+                    host_id: host_id, aggregate_table: table_name)
+    return unless previous_runs.any?
+    raise 'Previous run greater than current run' if previous_runs.first.run >= current_run
+  end
+
+  def_delegator :@factory, :new, :new_counter
 end
 
-# An in-memory holder for a Counter. Note the absence of a read method.
-class CounterHolder
-  def initialize(store, key)
-    @store, @key = store, key
-    @counter = nil
+# An in-memory holder for a Counter that accumulates updates.
+class Accumulator
+
+  attr_reader :row_key, :column_key, :generation
+
+  def initialize(store, row_key, column_key, generation)
+    @store, @row_key, @column_key, @generation = store, row_key, column_key, generation
+    @counter = store.new_counter
     @mutex = Mutex.new
   end
 
-  def fetch!
-    lock do
-      @counter = @store.retrieve(@key) unless @counter
-    end
-  end
-
   def save
-    lock do
-      @store.store(@key, @counter)
-    end
+    state = lock { @counter.serialize }
+    @store.store(self, CqlHelper::Blob.new(state))
   end
 
   def update(item)
-    lock do
-      @counter.update(item)
-    end
+    lock { @counter.update(item) }
   end
 
   private
