@@ -21,16 +21,10 @@ Then you need Cassandra running on localhost on the default port.
 To run the tests:
 
     $ bundle install
-    $ cqlsh < schema.cql
+    $ bin/rake create_schema
     $ bin/rake start_servers
     # patiently wait for 10 Puma instances to start up (output like "Puma 2.5.1 starting...")
     $ bin/rake test integration
-
-Insert some values:
-
-    $ bin/rackup -p 8000 -s puma &
-    $ curl -X POST http://localhost:8000/approx_distinct/add/1
-    $ curl http://localhost:8000/approx_distinct/hourly-summary
 
 License
 ---
@@ -38,10 +32,4 @@ License
 This example code is in the public domain.
 
 
-TODO
----
-
-"Garbage collect" the shards by periodically merging into a single counter. The way to safely do this
-is to have each node increment it's shard id every day (say), then you know the previous days' values can
-safely be assumed to be final.
 

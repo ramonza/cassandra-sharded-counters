@@ -3,10 +3,17 @@ require 'counter'
 require 'socket'
 require 'forwardable'
 
-# Store counters in Cassandra. Each server instance has a unique +shard_id+ which
-# it is responsible for. We guarantee local consistency between values with the same +shard_id+
-# so that we can just push new values to Cassandra without first reading existing values.
-# When we come to query the total value of the counters, we combine all these shard-local values.
+# Wraps an aggregate table in Cassandra. The table is logically keyed by (+row_key+, +column_key+). There are
+# three additional components of the primary key used to separate the counters into locally consistent shards:
+# 1. +host_id+ - opaque integer value identifying an distinct entity or 0
+# 2. +run+ - monotonically increasing (per host_id) sequence or 0
+# 3. +generation+ - opaque integer value or 0
+# For an entry <tt>(host_id, run, generation, final, current_state)</tt>, +current_state+ is _final_ if
+# 1. The entry <tt>(host_id, current_run)</tt> appears in the +host_current_runs+ table, where <tt>current_run > run</tt>
+# 2. +final+ has the value +true+
+# Final values will never be updated so it is safe for any actor who determines that a state is final to merge
+# all the final states for a given <tt>(row_key, column_key)</tt> by inserting the merged value and deleting the old values
+# atomically (they should have the same partition key).
 class AggregateTable
 
   extend Forwardable
@@ -47,9 +54,12 @@ class AggregateTable
     @update_access.synchronize do
       CqlHelper.execute("TRUNCATE #{table_name}")
       @cache = Hash.new
+      @current_generation = 1
     end
   end
 
+  # Clear the internal cache. This could be done on a LRU basis. The only consequence of clearing the cache is shard
+  # proliferation.
   def clear_cache
     @update_access.synchronize do
       @cache.each do |key, accumulator|
@@ -69,6 +79,8 @@ class AggregateTable
     end
   end
 
+  private
+
   def store(key, generation, state, finalize = false)
     key_columns = {
         row_key: key.row,
@@ -83,8 +95,6 @@ class AggregateTable
     updates[:final] = true if finalize
     CqlHelper.update(table_name, key_columns, updates)
   end
-
-  private
 
   def start_run
     sanity_check!
