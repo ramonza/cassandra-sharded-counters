@@ -46,7 +46,10 @@ class TestApi < MiniTest::Unit::TestCase
   end
 
   def test_clear_cache
-    post '/sum/foo/bar/add-sequence', {range_start: 1, range_end: 100}
+    post '/sum/foo/bar/add-sequence', {range_start: 1, range_end: 50}
+    assert_ok
+    delete '/sum/cache'
+    post '/sum/foo/bar/add-sequence', {range_start: 51, range_end: 100}
     assert_ok
     delete '/sum/cache'
     assert_ok

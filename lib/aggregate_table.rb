@@ -16,6 +16,44 @@ require 'forwardable'
 # atomically (they should have the same partition key).
 class AggregateTable
 
+  class AggregateKey < Struct.new(:row, :column)
+    def to_h
+      {row_key: row, column_key: column}
+    end
+  end
+
+  # An in-memory holder for a Counter that accumulates updates.
+  class Accumulator < Struct.new(:generation, :counter)
+    extend Forwardable
+    delegate [:serialize, :update] => :counter
+  end
+
+  class Shard < Struct.new(:key, :host_id, :run, :generation, :counter_state, :final)
+
+    attr_reader :counter
+
+    def initialize(fields)
+      fields['key'] = AggregateKey.new(fields.delete('row_key'), fields.delete('column_key'))
+      super *fields.values_at(*Shard.members.map(&:to_s))
+    end
+
+    def deserialize_counter(factory)
+      @counter = factory.deserialize(counter_state)
+    end
+
+    def to_h
+      Hash[each_pair.to_a].tap do |h|
+        h.merge! h.delete(:key).to_h
+      end
+    end
+
+    def self.find_by_row(table_name, row_key)
+      CqlHelper.
+          query("SELECT * FROM #{table_name} WHERE row_key = %{row}", {row: row_key}).
+          map { |row| new(row) }
+    end
+  end
+
   extend Forwardable
 
   @host_id = (ENV['HOST_ID'] || Socket.gethostname.hash).to_i
@@ -33,24 +71,24 @@ class AggregateTable
     @cache = Hash.new
     @current_generation = 1
     @update_access = Mutex.new
+    @current_runs = Hash.new
     start_run
   end
 
-	def read_row(row_key)
-    results = CqlHelper.query("SELECT * FROM #{table_name} WHERE row_key = %{row}", {row: row_key})
-    by_column = results.group_by { |row| row['column_key'] }
+  def read_row(row_key)
+    results = Shard.find_by_row(table_name, row_key)
+    results.each { |shard| shard.deserialize_counter(@factory) }
     report = Hash.new
-    by_column.each do |column_key, rows|
-      shards = rows.map { |row|
-        @factory.deserialize(row['counter_state'])
-      }
-      sum = @factory.merge(shards).value
-      report[column_key] = sum
+    batch = Array.new
+    results.group_by(&:key).each do |key, shards|
+      report[key.column] = merged_counter(shards).value
+      batch += maybe_gc(key, shards)
     end
+    CqlHelper.execute_batch(batch) unless batch.empty?
     report
   end
 
-	def clear! # this is just for testing
+  def clear! # this is just for testing
     @update_access.synchronize do
       CqlHelper.execute("TRUNCATE #{table_name}")
       @cache = Hash.new
@@ -59,7 +97,7 @@ class AggregateTable
   end
 
   # Clear the internal cache. This could be done on a LRU basis. The only consequence of clearing the cache is shard
-  # proliferation.
+  # proliferation, it does not slow updates.
   def clear_cache
     @update_access.synchronize do
       @cache.each do |key, accumulator|
@@ -70,9 +108,9 @@ class AggregateTable
     end
   end
 
-	def update(row_key, column_key, value)
+  def update(row_key, column_key, value)
     @update_access.synchronize do
-		  key = AggregateKey.new(row_key, column_key)
+      key = AggregateKey.new(row_key, column_key)
       accumulator = (@cache[key] ||= Accumulator.new(@current_generation, new_counter))
       accumulator.update(value)
       store(key, accumulator.generation, accumulator.serialize)
@@ -80,6 +118,42 @@ class AggregateTable
   end
 
   private
+
+  def merged_counter(shards)
+    @factory.merge(shards.map(&:counter))
+  end
+
+  def maybe_gc(key, shards)
+    batch = []
+    final_shards = shards.select { |shard| is_final?(shard) }
+
+    return batch unless final_shards.count > 1
+
+    sum_counter = merged_counter(final_shards)
+
+    final_shards.each do |shard|
+      batch << ["DELETE FROM #{table_name} WHERE row_key = %{row_key} AND column_key = %{column_key} AND " +
+                "host_id = %{host_id} AND run = %{run} AND generation = %{generation}", shard.to_h]
+    end
+    insert_values = {
+        state: CqlHelper::Blob.new(sum_counter.serialize),
+        host_id: host_id,
+        run: current_run,
+        generation: 0,
+    }
+    insert_values.merge!(key.to_h)
+    batch << ["UPDATE #{table_name} SET counter_state = %{state}, final = true " +
+              "WHERE row_key = %{row_key} AND column_key = %{column_key} AND host_id = %{host_id} AND run = %{run} " +
+              "AND generation = %{generation}", insert_values]
+
+    batch
+  end
+
+  def is_final?(shard)
+    return true if shard.final
+    current = @current_runs[shard.host_id]
+    current && current > shard.run
+  end
 
   def store(key, generation, state, finalize = false)
     key_columns = {
@@ -103,19 +177,11 @@ class AggregateTable
 
   def sanity_check!
     previous_runs = CqlHelper.query('SELECT current_run FROM host_current_runs WHERE aggregate_table = %{aggregate_table} AND host_id = %{host_id}',
-                    host_id: host_id, aggregate_table: table_name)
+                                    host_id: host_id, aggregate_table: table_name)
     return unless previous_runs.any?
-    raise 'Previous run greater than current run' if previous_runs.first.run >= current_run
+    previous_run = previous_runs.first['current_run']
+    raise "Previous run (#{previous_run}) is not less than current run (#{current_run}) for host #{host_id}" if previous_run >= current_run
   end
 
   def_delegator :@factory, :new, :new_counter
-end
-
-class AggregateKey < Struct.new(:row, :column)
-end
-
-# An in-memory holder for a Counter that accumulates updates.
-class Accumulator < Struct.new(:generation, :counter)
-  extend Forwardable
-  delegate [:serialize, :update] => :counter
 end

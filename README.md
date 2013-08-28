@@ -21,8 +21,7 @@ Then you need Cassandra running on localhost on the default port.
 To run the tests:
 
     $ bundle install
-    $ bin/rake create_schema
-    $ bin/rake start_servers
+    $ bin/rake create_schema start_servers
     # patiently wait for 10 Puma instances to start up (output like "Puma 2.5.1 starting...")
     $ bin/rake test multiprocess_test
 

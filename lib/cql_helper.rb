@@ -70,13 +70,10 @@ module CqlHelper
     cql % params
   end
 
-  def self.batch
-    statements = ['BEGIN BATCH']
-    while (next_statement = yield)
-      statements << interpolate_cql(*next_statement)
-    end
-    statements << 'APPLY BATCH'
-    client.execute(statements.join("\n"))
+  def self.execute_batch(statements)
+    interpolated = statements.map{ |statement| interpolate_cql(*statement) }
+    batch_statement = ['BEGIN BATCH', interpolated, 'APPLY BATCH'].flatten.join("\n")
+    execute(batch_statement)
   end
 
 end
