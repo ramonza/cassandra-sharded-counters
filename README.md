@@ -1,7 +1,7 @@
 Complex counters example with Cassandra, JRuby and stream-lib
 ===
 
-Cassandra has counter columns but they only support simply increment/decrement of integer values. There are also
+Cassandra has counter columns but they only support simple increment/decrement of integer values. There are also
 [some issues](http://wiki.apache.org/cassandra/Counters#Technical_limitations) with these. This is my attempt at a scheme
 for more robust and general counters on top of standard (non-counter) Cassandra columns mostly to help me
 learn Cassandra.
