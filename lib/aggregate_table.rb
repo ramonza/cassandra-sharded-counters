@@ -113,6 +113,7 @@ class AggregateTable
       key = AggregateKey.new(row_key, column_key)
       accumulator = (@cache[key] ||= Accumulator.new(@current_generation, new_counter))
       accumulator.update(value)
+      # TODO batch these updates
       store(key, accumulator.generation, accumulator.serialize)
     end
   end
