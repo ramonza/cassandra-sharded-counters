@@ -74,14 +74,14 @@ Limitations:
 * All clocks must be synchronized to within an hour
 
 Requirements
----
+------------
 
 * JRuby 1.7.4
 * [stream-lib](https://github.com/clearspring/stream-lib)
 * Apache Cassandra 1.2
 
 Running
----
+-------
 
 You first need to install stream-lib:
 
@@ -98,7 +98,7 @@ To run the tests:
     $ bin/rake test multiprocess_test
 
 License
----
+-------
 
 Public domain, not fit for any particular purpose.
 

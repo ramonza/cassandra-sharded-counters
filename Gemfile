@@ -1,5 +1,5 @@
 #ruby=jruby
-#ruby-env-JRUBY_OPTS=--1.9 -J-XX:+TieredCompilation -J-Djruby.launch.inproc=true
+#ruby-env-JRUBY_OPTS=--1.9 -J-XX:+TieredCompilation -J-XX:TieredStopAtLevel=1 -J-Djruby.launch.inproc=true
 
 source 'https://rubygems.org'
 
