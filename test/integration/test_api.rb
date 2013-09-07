@@ -1,4 +1,4 @@
-require_relative '../../bootstrap'
+require_relative 'helper'
 require 'rack/test'
 require 'minitest/autorun'
 require 'api'
@@ -13,10 +13,17 @@ class TestApi < MiniTest::Unit::TestCase
   end
 
   def setup
+    super
+    AggregateTable.reset_time
     delete '/approx_distinct'
     assert_ok
     delete '/sum'
     assert_ok
+  end
+
+  def teardown
+    AggregateTable.reset_time
+    super
   end
 
   def test_get_empty
@@ -49,12 +56,19 @@ class TestApi < MiniTest::Unit::TestCase
     post '/sum/foo/bar/add-sequence', {range_start: 1, range_end: 50}
     assert_ok
     delete '/sum/cache'
-    post '/sum/foo/bar/add-sequence', {range_start: 51, range_end: 100}
+    post '/sum/foo/bar/add-sequence', {range_start: 51, range_end: 75}
     assert_ok
     delete '/sum/cache'
     assert_ok
+    AggregateTable.set_time(AggregateTable.time + 24.hours)
+    post '/sum/foo/bar/add-sequence', {range_start: 76, range_end: 100}
     post '/sum/foo/baz/add-sequence', {range_start: 1, range_end: 50}
     assert_ok
+    get '/sum/foo'
+    assert_ok
+    values = JSON.parse(last_response.body)
+    assert_equal 5050, values['bar'], values.inspect
+    assert_equal 1275, values['baz'], values.inspect
     get '/sum/foo'
     assert_ok
     values = JSON.parse(last_response.body)

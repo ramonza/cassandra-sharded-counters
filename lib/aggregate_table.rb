@@ -3,6 +3,7 @@ require 'counter'
 require 'socket'
 require 'forwardable'
 require 'mutator'
+require 'garbage_collector'
 
 # Wraps an aggregate table in Cassandra. The table is logically keyed by (+row_key+, +column_key+). There are
 # three additional components of the primary key used to separate the counters into locally consistent shards:
@@ -25,6 +26,24 @@ class AggregateTable
     @update_access = Mutex.new
   end
 
+  def create_table
+    begin
+      execute("DROP TABLE #{name}")
+    rescue
+      # ignored
+    end
+    execute(<<-EOF)
+      CREATE TABLE #{name} (
+        row_key varchar,
+        column_key varchar,
+        mutator_id uuid,
+        state blob,
+        expires_at timestamp,
+        PRIMARY KEY (row_key, column_key, mutator_id)
+      )
+    EOF
+  end
+
   def name
     @table_name
   end
@@ -32,8 +51,12 @@ class AggregateTable
   def read_row(row_key)
     results = query("SELECT * FROM #{name} WHERE row_key = %{row_key}", row_key: row_key)
     report = Hash.new
-    results.group_by {|result| result['column_key']}.each do |column_key, entry|
-      report[column_key] = merge_shards(entry).value
+    results.group_by {|result| result[:column_key]}.each do |column_key, shards|
+      report[column_key] = merge_shards(shards).value
+      gc = GarbageCollector.new(self, row_key: row_key, column_key: column_key)
+      if gc.collectable(shards).size >= 1
+        gc.collect
+      end
     end
     report
   end
@@ -66,14 +89,22 @@ class AggregateTable
     end
   end
 
-  private
+  def time
+    Time.now
+  end
 
   def merge_shards(shards)
-    counters = shards.map {|shard| @factory.deserialize(shard['state']) }
+    counters = shards.map {|shard| @factory.deserialize(shard[:state]) }
     @factory.merge(counters)
+  end
+
+  def on_garbage_collection(all_shards, collected_shards, tally_counter)
+    $logger.debug("Garbage collected #{collected_shards.size}/#{all_shards.size} shards, replaced with new value #{tally_counter.value}")
   end
 
   extend Forwardable
 
   def_delegator :@factory, :new, :new_counter
+
+  protected
 end

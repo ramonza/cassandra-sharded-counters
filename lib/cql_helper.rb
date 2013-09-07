@@ -31,24 +31,13 @@ module CqlHelper
       when String, Symbol
         quote_cql_string(value.to_s)
       when Time
-        (value.to_f * 1000).to_i.to_s
+        (value.to_f * 1000).to_i.to_s + " /*#{value}*/"
       when java.util.UUID
+        value.to_s
+      when Cql::Uuid
         value.to_s
       else
         raise "Don't know how to convert #{value} to CQL"
-    end
-  end
-
-  def query(cql, params = {}, consistency = :one)
-    interpolated = interpolate_cql(cql, params)
-    if debug_cql?
-      $stderr.puts "CQL : #{interpolated}"
-      $stderr.flush
-    end
-    begin
-      client.execute(interpolated, consistency)
-    rescue => e
-      raise "Error executing CQL '#{interpolated}': #{e.message}"
     end
   end
 
@@ -63,17 +52,48 @@ module CqlHelper
     execute("UPDATE #{table} SET #{set} WHERE #{where}")
   end
 
-  alias_method :execute, :query
-
-  def interpolate_cql(cql, params = {})
-    params = Hash[params.map { |name, value| [name, quote_cql_param(value)] }]
-    cql % params
+  def query(cql, params = {}, consistency = :one)
+    execute_internal(cql, params, consistency).map &:with_indifferent_access
   end
 
-  def execute_batch(statements)
+  def execute(cql, params = {}, consistency = :one)
+    execute_internal(cql, params, consistency)
+    nil
+  end
+
+  def interpolate_cql(cql, params = {})
+    params = Hash[params.map { |name, value| [name.to_sym, quote_cql_param(value)] }]
+    begin
+      cql % params
+    rescue KeyError => e
+      raise KeyError, "#{e}: #{cql}"
+    end
+  end
+
+  def execute_batch(statements, timestamp = nil)
+    if timestamp
+      begin_batch = "BEGIN BATCH USING TIMESTAMP #{(timestamp.to_f * 1_000_000).to_i}"
+    else
+      begin_batch = 'BEGIN BATCH'
+    end
     interpolated = statements.map{ |statement| interpolate_cql(*statement) }
-    batch_statement = ['BEGIN BATCH', interpolated, 'APPLY BATCH'].flatten.join("\n")
+    batch_statement = [begin_batch, interpolated, 'APPLY BATCH'].flatten.join("\n")
     execute(batch_statement)
+  end
+
+  private
+
+  def execute_internal(cql, params, consistency)
+    interpolated = interpolate_cql(cql, params)
+    if debug_cql?
+      $stderr.puts "CQL : #{interpolated}"
+      $stderr.flush
+    end
+    begin
+      client.execute(interpolated, consistency)
+    rescue => e
+      raise "#{e.message} in CQL: '#{interpolated}'"
+    end
   end
 
 end

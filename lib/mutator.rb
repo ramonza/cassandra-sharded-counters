@@ -7,14 +7,11 @@ class Mutator
 
   class DeadMutatorException < StandardError; end
 
-  MINUTES = 60
-  HOURS = 60 * MINUTES
-
   def initialize(table, key)
     @table = table
     @shard_key = key.merge(mutator_id: java.util.UUID.randomUUID)
     @counter = @table.new_counter
-    @deathdate = round_to_next_minute(Time.now + 24 * HOURS + 1 * MINUTES)
+    @expires_at = round_to_next_minute(@table.time + 24.hours)
   end
 
   def increment(value)
@@ -27,30 +24,30 @@ class Mutator
   def ensure_alive!
     if dead?
       @counter = @shard_key = nil
-      raise DeadMutatorException, "Died at #{@deathdate}"
+      raise DeadMutatorException, "Died at #{@expires_at}"
     end
   end
 
   def dead?
-    @deathdate < Time.now + 1 * HOURS
+    @expires_at < @table.time + 1.hour
   end
 
   def flush
-    @deathdate = round_to_next_minute(Time.now + 60 * MINUTES)
+    @expires_at = round_to_next_minute(@table.time + 1.hour)
     save
   end
 
   private
 
   def save
-    update(@table.name, @shard_key, deathdate: @deathdate, state: @state) if @state
+    update(@table.name, @shard_key, expires_at: @expires_at, state: @state) if @state
   end
 
   def round_to_next_minute(t)
     seconds = t.to_i
-    unless seconds % MINUTES == 0
-      seconds = seconds + 1 * MINUTES
-      seconds = seconds - (seconds % MINUTES)
+    unless seconds % 60 == 0
+      seconds = seconds + 60
+      seconds = seconds - (seconds % 60)
     end
     Time.at(seconds)
   end

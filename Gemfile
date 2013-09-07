@@ -8,6 +8,7 @@ gem 'grape'
 gem 'cql-rb'
 gem 'puma'
 gem 'pry'
+gem 'activesupport'
 
 group :test do
 	gem 'minitest'

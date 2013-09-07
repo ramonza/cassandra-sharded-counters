@@ -9,11 +9,11 @@ Rake::TestTask.new do |t|
 end
 
 Rake::TestTask.new :multiprocess_test do |t|
-  t.pattern = 'test/integration/test_*.rb'
+  t.pattern = 'test/test_api_multiprocess.rb'
 end
 
-Rake::TestTask.new :rack_test do |t|
-  t.pattern = 'test/rack/test_*.rb'
+Rake::TestTask.new :integration do |t|
+  t.pattern = 'test/integration/test_*.rb'
 end
 
 task :start_servers do
@@ -48,21 +48,10 @@ task :create_schema do
     CREATE KEYSPACE counters WITH
       replication = {'class': 'SimpleStrategy', 'replication_factor': 1};
   EOF
+  require 'bootstrap'
+  require 'aggregate_table'
 
-  client.use('counters')
-  # aggregate tables
   %w(approx_distinct sum min max).each do |table|
-    client.execute <<-EOF
-      CREATE TABLE #{table} (
-        row_key varchar,
-        column_key varchar,
-        mutator_id uuid,
-        state blob,
-        deathdate timestamp,
-        PRIMARY KEY (row_key, column_key, mutator_id)
-      )
-    EOF
+    AggregateTable.new(table, nil).create_table
   end
-
-
 end
