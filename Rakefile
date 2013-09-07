@@ -46,34 +46,20 @@ task :create_schema do
   end
   client.execute <<-EOF
     CREATE KEYSPACE counters WITH
-      replication = {'class': 'SimpleStrategy', 'replication_factor': 3};
+      replication = {'class': 'SimpleStrategy', 'replication_factor': 1};
   EOF
 
   client.use('counters')
-
-  # current run
-  client.execute <<-EOF
-    CREATE TABLE host_current_runs (
-      host_id VARINT,
-      aggregate_table VARCHAR,
-      current_run VARINT,
-      started_at TIMESTAMP,
-      PRIMARY KEY (host_id, aggregate_table)
-    )
-  EOF
-
   # aggregate tables
   %w(approx_distinct sum min max).each do |table|
     client.execute <<-EOF
       CREATE TABLE #{table} (
-        row_key VARCHAR,
-        column_key VARCHAR,
-        host_id VARINT,
-        run VARINT,
-        generation VARINT,
-        counter_state BLOB,
-        final BOOLEAN,
-        PRIMARY KEY (row_key, column_key, host_id, run, generation)
+        row_key varchar,
+        column_key varchar,
+        mutator_id uuid,
+        state blob,
+        deathdate timestamp,
+        PRIMARY KEY (row_key, column_key, mutator_id)
       )
     EOF
   end

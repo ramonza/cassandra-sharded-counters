@@ -1,10 +1,64 @@
 Complex counters example with Cassandra, JRuby and stream-lib
-===
+=============================================================
 
 Cassandra has counter columns but they only support simple increment/decrement of integer values. There are also
 [some issues](http://wiki.apache.org/cassandra/Counters#Technical_limitations) with these. This is my attempt at a scheme
 for more robust and general counters on top of standard (non-counter) Cassandra columns mostly to help me
 learn Cassandra.
+
+How it works
+------------
+
+Each counter is a tuple `<mutator_id, state, deathdate>` where `mutator_id` is a unique identifier for an actor
+processing updates to the counter , `state` is the local state of mutator with id `mutator_id` and `deathdate` is a
+timestamp that tells us when the mutator will die, used by the garbage collection process. A mutator never updates
+it's shard after `deathdate` has passed. For example, in a sum counter the state would be just the local sum of
+values seen by the indicated mutator.
+
+When a mutator is born, it sets it's `deathdate` 24 hours in the future. For each update command it receives,
+it check's that it's `deathdate` is at least an hour in the future. If it is, it applies the update locally and
+serializes it's state to it's shard in Cassandra. Otherwise, it refuses the update and dies immediately. The client must
+create a new mutator to apply this update.
+
+To read the current total, any process can read all shards and add up the states locally (merge). A mutator can die
+at any point without coordination, there is no guarantee that it lives until `deathdate`. Under memory pressure for
+example, a mutator can be unceremoniously culled. If any client sends a subsequent update,
+a new mutator will be created.
+
+The problem now is that over time we accumulate shards. This requires a garbage collection (GC) process. The job of
+garbage collection will be to clear out shards from dead mutators and merge their states into a single special shard
+which we will call the tally.
+
+Suppose that we read all shards (including any previous tally) at consistency level `ALL` and we
+find that some of them have `deathdate`s more than an hour in the past. Under the assumption that clocks are
+synchronized to within an hour, we can be certain that these shards are _final_ (will never be updated).
+
+Their state is added to the previous tally (or a blank one if there wasn't a previous tally) and we issue a Cassandra
+ batch mutation deleting the shards and updating the tally with the new value that includes the state from all the
+ deleted shards. Because all shards live in the same partition, this batch will be applied in isolation.
+
+This is the only operation that updates values in Cassandra based on previously read values so we need to take
+special care that it's safe in the presence of multiple concurrent, uncoordinated GC processes.
+
+To this end, we would like to make the GC batch idempotent. That is, we must be able to read all the final shards as
+well as the previous tally, compute the batch operation and then repeatedly send this operation to Cassandra once
+every second for the next year (I find hyperbole a useful tool in appreciating eventual consistency!)
+
+We can do this if we set the timestamp on the batch operation to the highest observed `deathdate`,
+plus 1 second. To avoid ambiguity, we impose the restriction that `deathdate`s be always a round minute value. Then
+repeatedly submitting our GC batch never overwrites a tally value that was created from newer shards (shards with
+greater `deathdate`).
+
+If some other GC process reads exactly the same dead shards as we do it will produce the same batch update so there
+will be no conflict. If it reads a few more dead shards before our update has been applied,
+the additional shards must all have `deathdate`s greater than any shards we considered. Then the other process's update
+will have a greater timestamp than ours and so will overwrite our update. If the other process reads the shards after
+ our update has been applied then it will also have observed our updated tally state and any new shards it considers
+ will have `deathdate`s greater than any that we considered.
+
+Clearly, the GC process requires all replicas to be up (due to reads at CL `ALL`) but that's not really a problem
+since GC is just an optimization and doesn't affect the correctness of the system. It can be deferred to times when
+the network is healthy.
 
 This implementation satisfies the following constraints:
 
@@ -14,19 +68,19 @@ This implementation satisfies the following constraints:
 * All writes to Cassandra are idempotent
 * Mutator memory can be limited without affecting updates
 
-The basic approach is to shard counters by some unique ID "owned" by a particular mutator. Then, we add some structure
-to these IDs that let us know when a particular shard will never be updated again. Readers locate all shards associated
-with a counter and merge them, optionally garbage collecting any finalized shards.
+Limitations:
 
-One of the limitations of this approach is that reads slow linearly with the number of mutators, although I would guess
-that constant factors would dominate up to a few dozen mutators.
+* Reads (and GC) slow linearly with the number of mutators, although I would guess that constant factors would
+  dominate up to a few dozen mutators.
+* GC requires all replicas to be up
+* All clocks must be synchronized to within an hour
 
 Requirements
 ---
 
 * JRuby 1.7.4
 * [stream-lib](https://github.com/clearspring/stream-lib)
-* Apache Cassandra
+* Apache Cassandra 1.2
 
 Running
 ---
