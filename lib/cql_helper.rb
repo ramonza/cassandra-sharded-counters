@@ -76,7 +76,7 @@ module CqlHelper
     else
       begin_batch = 'BEGIN BATCH'
     end
-    interpolated = statements.map{ |statement| interpolate_cql(*statement) }
+    interpolated = statements.map { |statement| interpolate_cql(*statement) }
     batch_statement = [begin_batch, interpolated, 'APPLY BATCH'].flatten.join("\n")
     execute(batch_statement)
   end

@@ -5,7 +5,8 @@ class Mutator
 
   include CqlHelper
 
-  class DeadMutatorException < StandardError; end
+  class DeadMutatorException < StandardError;
+  end
 
   def initialize(table, key)
     @table = table

@@ -42,7 +42,7 @@ class AggregateTable
   def read_row(row_key)
     results = query("SELECT * FROM #{name} WHERE row_key = %{row_key}", row_key: row_key)
     report = Hash.new
-    results.group_by {|result| result[:column_key]}.each do |column_key, shards|
+    results.group_by { |result| result[:column_key] }.each do |column_key, shards|
       report[column_key] = merge_shards(shards).value
       gc = GarbageCollector.new(self, row_key: row_key, column_key: column_key)
       if gc.collectable(shards).size >= 1
@@ -85,7 +85,7 @@ class AggregateTable
   end
 
   def merge_shards(shards)
-    counters = shards.map {|shard| @factory.deserialize(shard[:state]) }
+    counters = shards.map { |shard| @factory.deserialize(shard[:state]) }
     @factory.merge(counters)
   end
 

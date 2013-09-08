@@ -11,12 +11,12 @@ gem 'pry'
 gem 'activesupport'
 
 group :test do
-	gem 'minitest'
+  gem 'minitest'
   gem 'minitest-reporters'
   gem 'rack-test'
 end
 
 group :development do
-	gem 'rake'
+  gem 'rake'
   gem 'ruby-debug-base'
 end
