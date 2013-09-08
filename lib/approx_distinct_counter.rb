@@ -2,7 +2,6 @@ require 'java'
 require 'thread'
 require 'counter'
 
-
 class ApproxDistinctCounter < Counter
   import 'com.clearspring.analytics.stream.cardinality.HyperLogLog'
 

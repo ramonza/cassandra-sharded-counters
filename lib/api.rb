@@ -7,6 +7,7 @@ require 'aggregate_table'
 require 'approx_distinct_counter'
 require 'simple_counters'
 
+# A simple HTTP API to update and read counters
 module ShardedCounters
   class API < Grape::API
 

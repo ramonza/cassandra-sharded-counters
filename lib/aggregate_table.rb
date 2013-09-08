@@ -6,6 +6,7 @@ require 'mutator'
 require 'garbage_collector'
 
 # Wraps an aggregate table in Cassandra. Each (+row_key+, +column_key+) hosts a single counter.
+# Dispatches to +Mutator+ for mutations and +GarbageCollector+ for garbage collection.
 class AggregateTable
 
   include CqlHelper
