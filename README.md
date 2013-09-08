@@ -30,7 +30,7 @@ garbage collection will be to clear out shards from dead mutators and merge thei
 which we will call the tally.
 
 Suppose that we read all shards (including any previous tally) at consistency level `ALL` and we
-find that some of them have `expires_at`s more than an hour in the past. Under the assumption that clocks are
+find that some of them have `expires_at` more than an hour in the past. Under the assumption that clocks are
 synchronized to within an hour, we can be certain that these shards are _final_ (will never be updated).
 
 Their state is added to the previous tally (or a blank one if there wasn't a previous tally) and we issue a Cassandra
@@ -50,10 +50,10 @@ submitting our GC batch never overwrites a tally value that was created from new
 
 If some other GC process reads exactly the same expired shards as we do it will produce the same batch update so
 there will be no conflict. If it reads a few more expired shards before our update has been applied,
-the additional shards must all have `expires_at`s greater than any shards we considered. Then the other process's
+the additional shards must all have `expires_at` greater than any shards we considered. Then the other process's
 update will have a greater timestamp than ours and so will overwrite our update. If the other process reads the
 shards after our update has been applied then it will also have observed our updated tally state and any new shards
-it considers will have `expires_at`s greater than any that we considered.
+it considers will have `expires_at` greater than any that we considered.
 
 The GC process requires all replicas to be up due to reads at CL `ALL` but since GC is just an optimization and
 doesn't affect the correctness of the system, it can be deferred to times when the network is healthy. This
