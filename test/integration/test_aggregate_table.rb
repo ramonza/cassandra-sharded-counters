@@ -36,18 +36,16 @@ class TestAggregateTable < MiniTest::Unit::TestCase
     assert_equal 30, table.read_row(ROW)[COLUMN]
   end
 
-  GcInfo = Struct.new(:all_shards, :collected_shards, :tally_counter)
-
   def test_garbage_collection
     table = AggregateTable.new('test', SumCounter)
     table.create_table
 
     gc = nil
     time = Time.now
-    table.define_singleton_method(:on_garbage_collection) do |*args|
-      gc = GcInfo.new(*args)
+    table.define_singleton_method(:on_garbage_collection) do |the_gc|
+      gc = the_gc
     end
-    table.define_singleton_method(:time) { time }
+    table.define_singleton_method(:time_now) { time }
 
     table.update(ROW, COLUMN, 10)
     assert_equal 10, table.read_row(ROW)[COLUMN]
@@ -62,7 +60,7 @@ class TestAggregateTable < MiniTest::Unit::TestCase
     time += 3.hours
     assert_equal 30, table.read_row(ROW)[COLUMN]
     assert gc, 'GC has occurred'
-    assert_equal 2, gc.collected_shards.size
+    assert_equal 2, gc.collecting.size
 
   end
 

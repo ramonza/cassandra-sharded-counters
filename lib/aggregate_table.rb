@@ -45,8 +45,9 @@ class AggregateTable
     results.group_by { |result| result[:column_key] }.each do |column_key, shards|
       report[column_key] = merge_shards(shards).value
       gc = GarbageCollector.new(self, row_key: row_key, column_key: column_key)
-      if gc.collectable(shards).size >= 1
+      if gc.can_collect?(shards)
         gc.collect
+        on_garbage_collection(gc)
       end
     end
     report
@@ -80,7 +81,7 @@ class AggregateTable
     end
   end
 
-  def time
+  def time_now
     Time.now
   end
 
@@ -89,8 +90,8 @@ class AggregateTable
     @factory.merge(counters)
   end
 
-  def on_garbage_collection(all_shards, collected_shards, tally_counter)
-    $logger.debug("Garbage collected #{collected_shards.size}/#{all_shards.size} shards, replaced with new value #{tally_counter.value}")
+  def on_garbage_collection(gc)
+    $logger.debug("Garbage collected #{gc.collecting.size}/#{gc.all_shards.size} shards, replaced with new value #{gc.new_tally.value}")
   end
 
   extend Forwardable

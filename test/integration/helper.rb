@@ -4,7 +4,7 @@ require 'aggregate_table'
 class AggregateTable
   @starttime = Time.now
 
-  alias_method :old_time, :time
+  alias_method :old_time, :time_now
 
   def time
     self.class.time
