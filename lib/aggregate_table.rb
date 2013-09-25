@@ -96,6 +96,4 @@ class AggregateTable
   extend Forwardable
 
   def_delegator :@factory, :new, :new_counter
-
-  protected
 end

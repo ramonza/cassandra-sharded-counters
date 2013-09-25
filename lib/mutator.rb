@@ -12,7 +12,7 @@ class Mutator
     @table = table
     @shard_key = key.merge(mutator_id: java.util.UUID.randomUUID)
     @counter = @table.new_counter
-    @expires_at = round_to_next_minute(@table.time + 24.hours)
+    @expires_at = @table.time + 24.hours
   end
 
   def increment(value)
@@ -34,7 +34,7 @@ class Mutator
   end
 
   def flush
-    @expires_at = round_to_next_minute(@table.time + 1.hour)
+    @expires_at = @table.time + 1.hour
     save
   end
 
@@ -42,14 +42,5 @@ class Mutator
 
   def save
     update(@table.name, @shard_key, expires_at: @expires_at, state: @state) if @state
-  end
-
-  def round_to_next_minute(t)
-    seconds = t.to_i
-    unless seconds % 60 == 0
-      seconds = seconds + 60
-      seconds = seconds - (seconds % 60)
-    end
-    Time.at(seconds)
   end
 end
