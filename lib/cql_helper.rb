@@ -30,8 +30,6 @@ module CqlHelper
         value.to_s
       when String, Symbol
         quote_cql_string(value.to_s)
-      when Time
-        (value.to_f * 1000).to_i.to_s + " /*#{value}*/"
       when java.util.UUID
         value.to_s
       when Cql::Uuid
@@ -70,9 +68,9 @@ module CqlHelper
     end
   end
 
-  def execute_batch(statements, timestamp = nil)
-    if timestamp
-      begin_batch = "BEGIN BATCH USING TIMESTAMP #{(timestamp.to_f * 1_000_000).to_i}"
+  def execute_batch(statements, timestamp_seconds = nil)
+    if timestamp_seconds
+      begin_batch = "BEGIN BATCH USING TIMESTAMP #{(timestamp_seconds * 1_000_000).to_i}"
     else
       begin_batch = 'BEGIN BATCH'
     end

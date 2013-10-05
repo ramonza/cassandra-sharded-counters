@@ -14,7 +14,7 @@ class TestApi < MiniTest::Unit::TestCase
 
   def setup
     super
-    AggregateTable.reset_time
+    AggregateTable.reset_clock
     delete '/approx_distinct'
     assert_ok
     delete '/sum'
@@ -22,7 +22,7 @@ class TestApi < MiniTest::Unit::TestCase
   end
 
   def teardown
-    AggregateTable.reset_time
+    AggregateTable.reset_clock
     super
   end
 
@@ -60,7 +60,7 @@ class TestApi < MiniTest::Unit::TestCase
     assert_ok
     delete '/sum/cache'
     assert_ok
-    AggregateTable.set_time(AggregateTable.time + 24.hours)
+    AggregateTable.advance_clock(24.hours)
     post '/sum/foo/bar/add-sequence', {range_start: 76, range_end: 100}
     post '/sum/foo/baz/add-sequence', {range_start: 1, range_end: 50}
     assert_ok

@@ -29,7 +29,7 @@ class AggregateTable
         column_key varchar,
         mutator_id uuid,
         state blob,
-        expires_at timestamp,
+        expires_at bigint,
         PRIMARY KEY (row_key, column_key, mutator_id)
       )
     EOF
@@ -81,8 +81,8 @@ class AggregateTable
     end
   end
 
-  def time_now
-    Time.now
+  def timestamp_seconds
+    Time.now.to_i
   end
 
   def merge_shards(shards)

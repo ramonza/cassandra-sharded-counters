@@ -10,11 +10,11 @@ class TestAggregateTable < MiniTest::Unit::TestCase
   COLUMN = 'column1'
 
   def setup
-    AggregateTable.reset_time
+    AggregateTable.reset_clock
   end
 
   def teardown
-    AggregateTable.reset_time
+    AggregateTable.reset_clock
   end
 
   def test_basic_increment
@@ -41,11 +41,9 @@ class TestAggregateTable < MiniTest::Unit::TestCase
     table.create_table
 
     gc = nil
-    time = Time.now
     table.define_singleton_method(:on_garbage_collection) do |the_gc|
       gc = the_gc
     end
-    table.define_singleton_method(:time_now) { time }
 
     table.update(ROW, COLUMN, 10)
     assert_equal 10, table.read_row(ROW)[COLUMN]
@@ -57,7 +55,7 @@ class TestAggregateTable < MiniTest::Unit::TestCase
 
     assert_nil gc, 'No GC yet'
 
-    time += 3.hours
+    AggregateTable.advance_clock(26.hours)
     assert_equal 30, table.read_row(ROW)[COLUMN]
     assert gc, 'GC has occurred'
     assert_equal 2, gc.collecting.size

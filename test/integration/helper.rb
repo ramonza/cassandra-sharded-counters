@@ -2,25 +2,25 @@ require_relative '../../bootstrap'
 require 'aggregate_table'
 
 class AggregateTable
-  @starttime = Time.now
+  @starttime = Time.now.to_i
 
-  alias_method :old_time, :time_now
+  alias_method :old_time, :timestamp_seconds
 
-  def time
-    self.class.time
+  def timestamp_seconds
+    self.class.timestamp_seconds
   end
 
-  def self.time
+  def self.timestamp_seconds
     @faketime
   end
 
-  def self.set_time(time)
-   @faketime = time
+  def self.advance_clock(duration)
+   @faketime += duration.to_i
   end
 
-  def self.reset_time
+  def self.reset_clock
     @faketime = @starttime
   end
 end
 
-AggregateTable.reset_time
+AggregateTable.reset_clock

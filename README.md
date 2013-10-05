@@ -1,5 +1,5 @@
-Complex counters example with Cassandra, JRuby and stream-lib
-=============================================================
+Order-free, sharded counters on Cassandra
+===
 
 Cassandra has counter columns but they only support simple increment/decrement of integer values. There are also
 [some issues](http://wiki.apache.org/cassandra/Counters#Technical_limitations) with these. This is my attempt at a scheme
@@ -29,31 +29,36 @@ The problem now is that over time we accumulate shards. This requires a garbage 
 garbage collection will be to clear out shards from dead mutators and merge their states into a single special shard
 which we will call the tally.
 
-Suppose that we read all shards (including any previous tally) at consistency level `ALL` and we
-find that some of them have `expires_at` more than an hour in the past. Under the assumption that clocks are
-synchronized to within an hour, we can be certain that these shards are _final_ (will never be updated).
+Suppose that we read all shards (including any previous tally) at consistency level `ALL` and we find that some of
+them have `expires_at` more than 24 hours in the past. Call this point in time 24 hours ago the GC cutoff. Under the
+assumption that clocks are synchronized to within some very generous margin (say a few hours),
+we can be certain that shards with `expires_at` older than the GC cutoff are _final_ (will never be updated): the
+behaviour of the mutators guarantees no new updates will be generated, we are outside the window for hinted handoffs
+to arrive asynchronously (`max_hint_window_in_ms`) and a successful read at CL `ALL` means we definitely got
+everything.
 
 Their state is added to the previous tally (or a blank one if there wasn't a previous tally) and we issue a Cassandra
  batch mutation deleting the shards and updating the tally with the new value that includes the state from all the
- deleted shards. Because all shards live in the same partition, this batch will be applied in isolation.
+ deleted shards.
 
 This is the only operation that updates values in Cassandra based on previously read values so we need to take
 special care that it's safe in the presence of multiple concurrent, uncoordinated GC processes.
 
 To this end, we would like to make the GC batch idempotent. That is, we must be able to read all the final shards as
 well as the previous tally, compute the batch operation and then repeatedly send this operation to Cassandra once
-every second for the next year (I find hyperbole a useful tool in appreciating eventual consistency!)
+every second for the next year (I find hyperbole a useful tool in appreciating Cassandra's LWW eventual consistency!)
 
-We can do this if we set the timestamp on the batch operation to the highest observed `expires_at`. Then repeatedly
-submitting our GC batch never overwrites a tally value that was created from newer shards (shards with greater
-`expires_at`).
+We can do this if we set the timestamp on the batch operation higher than the highest observed `expires_at`. Then
+repeatedly submitting our GC batch never overwrites a tally value that was created from newer shards (shards with
+greater `expires_at`).
 
 If some other GC process reads exactly the same expired shards as we do it will produce the same batch update so
 there will be no conflict. If it reads a few more expired shards before our update has been applied,
-the additional shards must all have `expires_at` greater than any shards we considered. Then the other process's
-update will have a greater timestamp than ours and so will overwrite our update. If the other process reads the
-shards after our update has been applied then it will also have observed our updated tally state and any new shards
-it considers will have `expires_at` greater than any that we considered.
+the additional shards must all have `expires_at` greater than any shards that we considered (we have already
+established that we have read the final and complete set of shards with `expires_at` less than the GC cutoff).  In this
+ case the other process's update will have a greater timestamp than ours and so will overwrite our update. If the
+ other process reads the shards after our update has been applied then it will also have observed our updated tally
+ state and any new shards it considers will have `expires_at` greater than any that we considered.
 
 The GC process requires all replicas to be up due to reads at CL `ALL` but since GC is just an optimization and
 doesn't affect the correctness of the system, it can be deferred to times when the network is healthy. This
@@ -61,7 +66,7 @@ implementation attempts a garbage collection after every read that returns more 
 
 This implementation satisfies the following constraints:
 
-* Supports arbitrary [CRDT](http://hal.upmc.fr/docs/00/55/55/88/PDF/techreport.pdf)s
+* Supports arbitrary order-free data structures [CRDT](http://hal.upmc.fr/docs/00/55/55/88/PDF/techreport.pdf)s
 * Counters can be read/updated on as many nodes as we like
 * Updates never read from Cassandra
 * All writes to Cassandra are idempotent
@@ -70,8 +75,7 @@ This implementation satisfies the following constraints:
 Limitations:
 
 * Reads (and GC) slow linearly with the number of mutators
-* GC requires all replicas to be up
-* All clocks must be synchronized to within an hour
+* GC requires all replicas to be up and reads at CL `ALL`
 
 Requirements
 ------------

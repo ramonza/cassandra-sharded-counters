@@ -3,7 +3,9 @@ require 'cql_helper'
 class GarbageCollector
 
   include CqlHelper
-  TALLY = java.util.UUID.from_string('e94b067d-0d8f-4efb-be3a-9518b961fc81')
+
+  TALLY = java.util.UUID.from_string('e94b067d-0d8f-4efb-be3a-9518b961fc81') # just a random, pre-generated UUID
+  GC_LAG_SECONDS = 24.hours.to_i # we will only collect shards with expires_at older than this
 
   attr_reader :all_shards, :collecting, :new_tally
 
@@ -24,9 +26,10 @@ class GarbageCollector
     batch = non_tally.collect { |shard| [ shard_delete_query, shard ] }
 
     # update the tally
-    batch << [ shard_update_query, @key.merge(mutator_id: TALLY, state: CqlHelper::Blob.new(@new_tally.serialize)) ]
+    tally_state = CqlHelper::Blob.new(@new_tally.serialize)
+    batch << [ shard_update_query, @key.merge(expires_at: 0, mutator_id: TALLY, state: tally_state) ]
 
-    timestamp = non_tally.collect { |shard| shard[:expires_at] }.max + 1.second
+    timestamp = non_tally.collect { |shard| shard[:expires_at] }.max
     execute_batch(batch, timestamp)
   end
 
@@ -37,7 +40,7 @@ class GarbageCollector
   private
 
   def collectable(shards)
-    cutoff = @table.time_now - 1.hour
+    cutoff = @table.timestamp_seconds - GC_LAG_SECONDS
     shards.select { |shard| !shard[:expires_at] || shard[:expires_at] < cutoff }
   end
 
